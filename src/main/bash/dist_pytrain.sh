@@ -31,6 +31,10 @@ source $HADOOP_HOME/libexec/hadoop-config.sh
 export CLASSPATH=$CLASSPATH:`$HADOOP_HOME/bin/hadoop classpath --glob`
 export HADOOP_HDFS_HOME="$HADOOP_HOME/../hadoop-hdfs"
 
+#enable GRPC debug log
+#export GRPC_TRACE=all
+#export GRPC_VERBOSITY=DEBUG
+
 $GLIBC_HOME/lib/ld-linux-x86-64.so.2 \
     --library-path $GLIBC_HOME/lib:$LD_LIBRARY_PATH:/lib64:$HADOOP_HOME/../usr/lib/:$JAVA_HOME/jre/lib/amd64/server \
     $PYTHON_HOME/bin/python \

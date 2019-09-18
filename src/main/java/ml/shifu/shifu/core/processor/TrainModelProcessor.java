@@ -29,6 +29,7 @@ import java.io.Reader;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
+import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,6 +41,8 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.Enumeration;
 
 import org.antlr.runtime.RecognitionException;
 import org.apache.commons.collections.CollectionUtils;
@@ -59,6 +62,8 @@ import org.apache.pig.LoadPushDown.RequiredFieldList;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.io.FileLocalizer;
+import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.util.JarManager;
 import org.apache.pig.impl.util.ObjectSerializer;
 import org.apache.zookeeper.ZooKeeper;
@@ -703,7 +708,9 @@ public class TrainModelProcessor extends BasicModelProcessor implements Processo
     }
 
     private void addTensorflowRuntimeJars(List<String> args) throws ClassNotFoundException {
-        List<String> jars = new ArrayList<String>(16);
+        initClassLoader();
+
+        List<String> jars = new ArrayList<>(getRuntimeJars());
         // zip4j-1.3.2.jar
         jars.add(JarManager.findContainingJar(Class.forName("net.lingala.zip4j.core.ZipFile")));
         // guagua-mapreduce-*.jar
@@ -715,7 +722,12 @@ public class TrainModelProcessor extends BasicModelProcessor implements Processo
         // shifu-tensorflow-on-yarn*.jar
         jars.add(JarManager.findContainingJar(Class.forName("ml.shifu.shifu.core.yarn.client.TensorflowClient")));
 
+        jars = jars.stream()
+                .distinct()
+                .collect(Collectors.toList());
+
         args.add(StringUtils.join(jars, NNConstants.LIB_JAR_SEPARATOR));
+
     }
 
     protected int runDistributedTrain() throws IOException, InterruptedException, ClassNotFoundException {
@@ -1718,8 +1730,85 @@ public class TrainModelProcessor extends BasicModelProcessor implements Processo
         }
     }
 
+
+
+    private URL locateJarFromResources(String jarName) throws IOException {
+        Enumeration<URL> urls = ClassLoader.getSystemResources(jarName);
+        URL resourceLocation = null;
+        if (urls.hasMoreElements()) {
+            resourceLocation = urls.nextElement();
+        }
+
+        if (urls.hasMoreElements()) {
+            StringBuffer sb = new StringBuffer("Found multiple resources that match ");
+            sb.append(jarName);
+            sb.append(": ");
+            sb.append(resourceLocation);
+
+            while(urls.hasMoreElements()) {
+                sb.append(urls.nextElement());
+                sb.append("; ");
+            }
+
+            LOG.debug(sb.toString());
+        }
+
+        return resourceLocation;
+    }
+
+    private void initClassLoader() {
+        try {
+
+            PigContext pigContext = new PigContext();
+
+            String libPath = pathFinder.getJarPath();
+
+            if (pigContext.hasJar(libPath)) {
+                LOG.debug("Ignoring duplicate registration for jar " + libPath);
+            } else {
+                if (libPath != null) {
+                    if (libPath.isEmpty()) {
+                        LOG.warn("Empty string specified for jar path");
+                        return;
+                    }
+
+                    URL resource = this.locateJarFromResources(libPath);
+                    if (resource == null) {
+                        FileLocalizer.FetchFileRet[] files = FileLocalizer.fetchFiles(pigContext.getProperties(), libPath);
+                        FileLocalizer.FetchFileRet[] arr$ = files;
+                        int len$ = files.length;
+
+                        for(int i$ = 0; i$ < len$; ++i$) {
+                            FileLocalizer.FetchFileRet file = arr$[i$];
+                            File f = file.file;
+                            if (!f.canRead()) {
+                                int errCode = 4002;
+                                String msg = "Can't read jar file: " + libPath;
+                                throw new FrontendException(msg, errCode, (byte)8);
+                            }
+
+                            pigContext.addJar(f.toURI().toURL(), libPath);
+                        }
+                    } else {
+                        pigContext.addJar(resource, libPath);
+                    }
+                }
+
+            }
+        } catch (Exception e) {
+            LOG.warn("Unable to initialize classloader", e);
+        }
+    }
+
+
     // GuaguaOptionsParser doesn't to support *.jar currently.
     private void addRuntimeJars(final List<String> args) {
+        args.add(StringUtils.join(getRuntimeJars(), NNConstants.LIB_JAR_SEPARATOR));
+    }
+
+    private List<String> getRuntimeJars() {
+        initClassLoader();
+
         List<String> jars = new ArrayList<String>(16);
         // pig-*.jar
         jars.add(JarManager.findContainingJar(Tuple.class));
@@ -1784,7 +1873,7 @@ public class TrainModelProcessor extends BasicModelProcessor implements Processo
             jars.add(JarManager.findContainingJar(ReadableInstant.class));
         }
 
-        args.add(StringUtils.join(jars, NNConstants.LIB_JAR_SEPARATOR));
+        return jars;
     }
 
     /**

@@ -1,5 +1,5 @@
 # zookeeperServers is used for distributed training 
-zookeeperServers=
+zookeeperServers=master:2181,slave1:2181,slave2:2181
 
 # hadoopNumParallel is for parallelity for when using mapreduce mode
 # deprecated: there is auto parallel setting in all pig scripts to help user no need to set this number
